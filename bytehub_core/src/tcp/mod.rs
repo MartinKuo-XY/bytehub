@@ -53,47 +53,12 @@ pub async fn run_tcp(endpoint: Endpoint) -> Result<()> {
         CancellationToken::new()
     };
 
-    // ── Active health probe tasks ─────────────────────────────────────────
-    #[cfg(feature = "balance")]
-    if let Some(probe_cfg) = &conn_opts.probe_config {
-        use std::sync::Arc;
-        let probe_cfg = Arc::new(probe_cfg.clone());
-        let balancer = Arc::new(conn_opts.balancer.clone());
-
-        for (idx, (token, fwd_raddr)) in peer_addrs.iter().enumerate() {
-            // Resolve the effective probe address for this token:
-            //   - If probe_targets[idx] exists, use it (e.g. the real remote
-            //     tunnel server address, decoupled from the local forwarding hop).
-            //   - Otherwise fall back to the forwarding address itself.
-            let probe_addr = conn_opts
-                .probe_targets
-                .get(idx)
-                .cloned()
-                .unwrap_or_else(|| fwd_raddr.clone());
-
-            let is_override = conn_opts.probe_targets.get(idx).is_some();
-            log::info!(
-                "[tcp] probe token={:?}: target={}{} fwd={}",
-                token,
-                probe_addr,
-                if is_override { " (override)" } else { "" },
-                fwd_raddr,
-            );
-
-            probe::spawn_probe_loop(
-                *token,
-                probe_addr,
-                Arc::clone(&balancer),
-                Arc::clone(&probe_cfg),
-                cancel.child_token(),
-            );
-        }
-        log::info!(
-            "[tcp] started {} active-probe task(s) for {}",
-            peer_addrs.len(),
-            laddr
-        );
-    }
+    // ── Active health probe tasks (DISABLED — passive detection via relay
+    //    latency / connect failures is sufficient and more reliable) ─────────
+    // #[cfg(feature = "balance")]
+    // if let Some(probe_cfg) = &conn_opts.probe_config {
+    //     ... probe::spawn_probe_loop(...) ...
+    // }
 
     // ── Connection pool ───────────────────────────────────────────────────
     #[cfg(feature = "balance")]
