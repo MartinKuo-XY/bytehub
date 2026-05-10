@@ -153,6 +153,21 @@ impl RemotePool {
         })
     }
 
+    /// Try to pop a healthy idle connection for `token` **without** creating
+    /// a new one on miss.  Returns `None` if the sub-pool is empty or all
+    /// idle connections are stale/dead.
+    ///
+    /// Intended for use by `connect_and_relay` so that on a pool miss the
+    /// caller can fall through to `try_connect_with_fallback` (multi-node
+    /// retry) instead of being locked into a single-peer connect attempt.
+    pub async fn pop_idle(&self, token: Token) -> Option<TcpStream> {
+        let idle_timeout = Duration::from_secs(self.config.pool_idle_timeout_secs);
+        let mut pools = self.pools.lock().await;
+        pools
+            .get_mut(&token.0)
+            .and_then(|p| p.pop_healthy(idle_timeout))
+    }
+
     /// Acquire a connection for `token`.
     ///
     /// 1. Try to pop a healthy idle connection from the sub-pool.

@@ -297,24 +297,39 @@ pub async fn connect_and_relay(
     let mut remote = {
         #[cfg(feature = "balance")]
         {
-            // If a connection pool is available, try to get an idle connection.
-            // Pool internally calls try_connect_with_fallback on cache miss,
-            // so the fallback behaviour is identical to the non-pool path.
+            // Connection-pool fast path:
+            //   - If a healthy idle connection is available for the balancer's
+            //     chosen token, reuse it directly (saves the TCP handshake RTT).
+            //   - If the sub-pool is empty or all idle connections are stale,
+            //     fall through to try_connect_with_fallback so that the full
+            //     multi-node retry loop is executed.  This is the critical fix:
+            //     the old code called pool.acquire() which always attempted a
+            //     new connect to a single token and returned Err on failure,
+            //     skipping fallback to other healthy peers entirely.
             if let Some(pool) = &remote_pool {
                 use bytehub_lb::{Token, BalanceCtx};
                 let src_ip = local.peer_addr()?.ip();
                 let tok = balancer.next(BalanceCtx { src_ip: &src_ip });
                 let token = tok.unwrap_or(Token(0));
-                match pool.acquire(token, conn_opts.as_ref()).await {
-                    Ok(stream) => {
-                        log::info!("[tcp](pool){} => token={:?}", local.peer_addr()?, token);
-                        selected_token = Some(token);
-                        stream
-                    }
-                    Err(e) => {
-                        balancer.on_failure(token);
-                        return Err(e);
-                    }
+
+                if let Some(stream) = pool.pop_idle(token).await {
+                    // Cache hit — idle connection is alive, use it directly.
+                    log::info!("[tcp](pool-hit){} => token={:?}", local.peer_addr()?, token);
+                    selected_token = Some(token);
+                    stream
+                } else {
+                    // Cache miss — delegate to full multi-node fallback loop.
+                    log::debug!("[tcp](pool-miss) token={:?} — falling back to try_connect_with_fallback", token);
+                    let (stream, tok) = try_connect_with_fallback(
+                        balancer,
+                        raddr.as_ref(),
+                        extra_raddrs.as_ref(),
+                        conn_opts.as_ref(),
+                        &local,
+                    )
+                    .await?;
+                    selected_token = tok;
+                    stream
                 }
             } else {
                 let (stream, tok) = try_connect_with_fallback(
