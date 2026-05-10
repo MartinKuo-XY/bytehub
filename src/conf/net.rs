@@ -190,6 +190,15 @@ impl Config for NetConf {
             #[cfg(feature = "balance")]
             balancer: Default::default(),
 
+            #[cfg(feature = "balance")]
+            probe_config: None,
+
+            #[cfg(feature = "balance")]
+            probe_targets: Vec::new(),
+
+            #[cfg(feature = "balance")]
+            pool_config: None,
+
             #[cfg(feature = "transport")]
             transport: None,
 

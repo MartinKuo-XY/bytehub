@@ -81,6 +81,7 @@ impl From<LegacyConf> for FullConf {
                 
                 // ======== 这里是刚刚缺少的字段 ========
                 obfs: None,
+                probe_targets: Vec::new(),
                 // ===================================
             })
             .collect();
