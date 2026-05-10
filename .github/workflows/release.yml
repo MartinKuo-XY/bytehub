@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04
+    env:
+      RUSTUP_TOOLCHAIN: nightly-2025-08-01
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pinned Rust nightly
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-08-01
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Show Rust version
+        run: |
+          rustc -Vv
+          cargo -V
+
+      - name: Build release
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Debug build outputs
+        if: success()
+        run: |
+          find target/x86_64-unknown-linux-gnu/release -maxdepth 1 -type f | sort || true
+
+      - name: Prepare artifacts
+        if: success()
+        run: |
+          mkdir -p out/x86_64-unknown-linux-gnu
+          cp target/x86_64-unknown-linux-gnu/release/bytehub out/x86_64-unknown-linux-gnu/
+          tar -C out/x86_64-unknown-linux-gnu -zcf out/x86_64-unknown-linux-gnu/bytehub-x86_64-unknown-linux-gnu.tar.gz bytehub
+
+      - name: Create release
+        if: success()
+        uses: softprops/action-gh-release@v3
+        with:
+          files: out/x86_64-unknown-linux-gnu/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
