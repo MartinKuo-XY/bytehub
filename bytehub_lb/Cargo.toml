@@ -12,3 +12,6 @@ license = "MIT"
 
 [dev-dependencies]
 average = "0.13"
+
+[dependencies]
+log = "0.4"
