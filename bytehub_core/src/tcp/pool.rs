@@ -17,8 +17,9 @@
 //!   the connection is never returned to us in a reusable state.
 //! - Relay ended with error: connection state is unknown.
 //!
-//! The pool is optional — it is only created when `pool_size > 0` is
-//! present in the endpoint config.
+//! The pool is always enabled when the `balance` feature is active.
+//! Only `pool_min_idle` is user-configurable (default: 128); all other
+//! parameters use fixed defaults defined in `PoolConfig::default()`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,10 +53,10 @@ pub struct PoolConfig {
 impl Default for PoolConfig {
     fn default() -> Self {
         Self {
-            pool_size: 8,
-            pool_min_idle: 2,
-            pool_connect_timeout_ms: 3000,
-            pool_idle_timeout_secs: 30,
+            pool_size: 1024,
+            pool_min_idle: 64,
+            pool_connect_timeout_ms: 1000,
+            pool_idle_timeout_secs: 20,
         }
     }
 }

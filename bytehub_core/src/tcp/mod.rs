@@ -131,10 +131,8 @@ pub async fn run_tcp(endpoint: Endpoint) -> Result<()> {
             }
         };
 
-        // ============================================================
-        // 【修改点】: 彻底删除了 let _ = local.set_nodelay(true);
-        // 保留 Nagle 算法，使得混淆首包和真实数据能被内核合并为一个包发送
-        // ============================================================
+        // Keep Nagle enabled: lets the kernel coalesce the obfs prefix
+        // and first payload into one segment, reducing observable packet timing.
 
         if let Some(kpa) = &keepalive {
             use socket::keepalive::SockRef;

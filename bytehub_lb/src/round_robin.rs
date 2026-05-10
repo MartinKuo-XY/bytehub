@@ -91,20 +91,14 @@ impl Balance for RoundRobin {
                 let fails = p.fails.load(Ordering::Relaxed);
                 let checked = p.checked.load(Ordering::Relaxed);
 
-                eprintln!("[DIAG] RR::next token={:?} fails={} checked={} now={} max_fails={}",
-                    p.token, fails, checked, now, cfg.max_fails);
-
                 if first_token.is_none() {
                     first_token = Some(p.token);
                 }
-
                 if fails >= cfg.max_fails {
                     if now < checked {
-                        eprintln!("[DIAG] RR::next SKIP token={:?} (unhealthy until ~{}s from now)", p.token, checked.saturating_sub(now));
-                        continue;
+                        continue; // still within exclusion window
                     }
                     // Timeout expired, auto-recover.
-                    eprintln!("[DIAG] RR::next RECOVER token={:?} (timeout expired)", p.token);
                     p.fails.store(0, Ordering::Relaxed);
                     p.checked.store(0, Ordering::Relaxed);
                 }
@@ -135,7 +129,6 @@ impl Balance for RoundRobin {
                 }
             }
             let fallback = nearest.map(|(_, t)| t).or(first_token);
-            eprintln!("[DIAG] RR::next ALL_UNHEALTHY fallback={:?} (nearest recovery)", fallback);
             return fallback;
         }
 
@@ -147,9 +140,7 @@ impl Balance for RoundRobin {
                 x.ew += 1;
             }
 
-            eprintln!("[DIAG] RR::next SELECT token={:?} cw={} ew={}", x.token, x.cw, x.ew);
-            x.token
-        })
+            x.token        })
     }
 
     fn on_success(&self, token: Token) {
@@ -163,7 +154,7 @@ impl Balance for RoundRobin {
             node.fails.store(0, Ordering::Relaxed);
             node.checked.store(0, Ordering::Relaxed);
             if was_failing {
-                eprintln!("[DIAG] RR::on_success token={:?} RESET (was failing)", token);
+                log::debug!("[lb] token={:?} recovered (was failing)", token);
             }
         }
     }
@@ -179,7 +170,7 @@ impl Balance for RoundRobin {
         if let Some(node) = nodes.iter_mut().find(|n| n.token == token) {
             let old_fails = node.fails.load(Ordering::Relaxed);
             let fails = node.fails.fetch_add(1, Ordering::Relaxed) + 1;
-            eprintln!("[DIAG] RR::on_failure token={:?} fails={} max_fails={}", token, fails, cfg.max_fails);
+            log::debug!("[lb] token={:?} fails={} max_fails={}", token, fails, cfg.max_fails);
 
             if fails >= cfg.max_fails {
                 // Only extend the exclusion window on the first crossing.
@@ -190,9 +181,7 @@ impl Balance for RoundRobin {
                     let now = now_secs();
                     node.checked
                         .store(now + cfg.fail_timeout_secs, Ordering::Relaxed);
-                    eprintln!("[DIAG] RR::on_failure MARK_UNHEALTHY token={:?} checked={} (now+{}s)", token, now + cfg.fail_timeout_secs, cfg.fail_timeout_secs);
-                } else {
-                    eprintln!("[DIAG] RR::on_failure STILL_UNHEALTHY token={:?} (checked unchanged, fails={})", token, fails);
+                    log::debug!("[lb] token={:?} marked unhealthy for {}s", token, cfg.fail_timeout_secs);
                 }
                 // Reduce effective weight to minimum for gradual recovery.
                 node.ew = 1;

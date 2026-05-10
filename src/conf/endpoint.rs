@@ -110,7 +110,7 @@ impl EndpointConf {
             (Some(max_fails), Some(fail_timeout)) => Some(HealthCheckConfig { max_fails, fail_timeout_secs: fail_timeout, max_latency_ms: max_latency }),
             _ => None,
         };
-        eprintln!("[DIAG] build_balancer max_fails={:?} fail_timeout={:?} max_latency={:?} → HealthCheckConfig={:?}",
+        log::debug!("[balancer] health_check max_fails={:?} fail_timeout={:?} max_latency={:?} → {:?}",
             max_fails, fail_timeout, max_latency, hc);
         if let Some(s) = &self.balance {
             // Parse strategy + weights, then reconstruct with health config.
@@ -167,7 +167,7 @@ impl Config for EndpointConf {
             mut bind_opts, mut conn_opts, no_tcp, use_udp,
             max_fails, fail_timeout, max_latency,
             probe_interval_secs, probe_unhealthy_interval_secs, probe_timeout_ms,
-            pool_size, pool_min_idle, pool_connect_timeout_ms, pool_idle_timeout_secs,
+            pool_min_idle,
         } = self.network.build();
 
         #[cfg(feature = "balance")] { conn_opts.balancer = self.build_balancer(max_fails, fail_timeout, max_latency); }
@@ -203,12 +203,9 @@ impl Config for EndpointConf {
         #[cfg(feature = "balance")]
         {
             use bytehub_core::tcp::pool::PoolConfig;
-            conn_opts.pool_config = pool_size.filter(|&s| s > 0).map(|size| PoolConfig {
-                pool_size: size,
-                pool_min_idle: pool_min_idle.unwrap_or(1),
-                pool_connect_timeout_ms: pool_connect_timeout_ms.unwrap_or(3000),
-                pool_idle_timeout_secs: pool_idle_timeout_secs.unwrap_or(30),
-            });
+            let mut cfg = PoolConfig::default();
+            if let Some(v) = pool_min_idle { cfg.pool_min_idle = v; }
+            conn_opts.pool_config = Some(cfg);
         }
 
         EndpointInfo { no_tcp, use_udp, endpoint: Endpoint { laddr, raddr, bind_opts, conn_opts, extra_raddrs } }

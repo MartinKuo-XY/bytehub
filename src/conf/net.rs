@@ -91,25 +91,11 @@ pub struct NetConf {
     pub probe_timeout_ms: Option<u64>,
 
     // ── Connection pool ─────────────────────────────────────────────────────
-    /// Max idle connections per peer. Setting this > 0 enables the pool.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pool_size: Option<usize>,
-
     /// Min idle connections the warmup task tries to maintain per peer.
+    /// The pool is always enabled. Default: 64.
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pool_min_idle: Option<usize>,
-
-    /// TCP connect timeout used by the pool (milliseconds). Default: 3000.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pool_connect_timeout_ms: Option<u64>,
-
-    /// Drop idle connections older than this many seconds. Default: 30.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pool_idle_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -126,10 +112,7 @@ pub struct NetInfo {
     pub probe_unhealthy_interval_secs: Option<u64>,
     pub probe_timeout_ms: Option<u64>,
     // pool
-    pub pool_size: Option<usize>,
     pub pool_min_idle: Option<usize>,
-    pub pool_connect_timeout_ms: Option<u64>,
-    pub pool_idle_timeout_secs: Option<u64>,
 }
 
 impl Config for NetConf {
@@ -143,7 +126,7 @@ impl Config for NetConf {
             tcp_keepalive, tcp_keepalive_probe, tcp_timeout, udp_timeout,
             max_fails, fail_timeout, max_latency,
             probe_interval_secs, probe_unhealthy_interval_secs, probe_timeout_ms,
-            pool_size, pool_min_idle, pool_connect_timeout_ms, pool_idle_timeout_secs
+            pool_min_idle
         ]
     }
 
@@ -183,9 +166,7 @@ impl Config for NetConf {
             bind_address: None,
             bind_interface: None,
             
-            // ======== 补充新增字段的初始化 ========
             obfs: String::new(),
-            // ====================================
 
             #[cfg(feature = "balance")]
             balancer: Default::default(),
@@ -233,10 +214,7 @@ impl Config for NetConf {
             probe_interval_secs: self.probe_interval_secs,
             probe_unhealthy_interval_secs: self.probe_unhealthy_interval_secs,
             probe_timeout_ms: self.probe_timeout_ms,
-            pool_size: self.pool_size,
             pool_min_idle: self.pool_min_idle,
-            pool_connect_timeout_ms: self.pool_connect_timeout_ms,
-            pool_idle_timeout_secs: self.pool_idle_timeout_secs,
         }
     }
 
@@ -263,10 +241,7 @@ impl Config for NetConf {
         rst!(self, probe_interval_secs, other);
         rst!(self, probe_unhealthy_interval_secs, other);
         rst!(self, probe_timeout_ms, other);
-        rst!(self, pool_size, other);
         rst!(self, pool_min_idle, other);
-        rst!(self, pool_connect_timeout_ms, other);
-        rst!(self, pool_idle_timeout_secs, other);
         self
     }
 
@@ -293,10 +268,7 @@ impl Config for NetConf {
         take!(self, probe_interval_secs, other);
         take!(self, probe_unhealthy_interval_secs, other);
         take!(self, probe_timeout_ms, other);
-        take!(self, pool_size, other);
         take!(self, pool_min_idle, other);
-        take!(self, pool_connect_timeout_ms, other);
-        take!(self, pool_idle_timeout_secs, other);
         self
     }
 
@@ -353,10 +325,7 @@ impl Config for NetConf {
             probe_interval_secs: None,
             probe_unhealthy_interval_secs: None,
             probe_timeout_ms: None,
-            pool_size: None,
             pool_min_idle: None,
-            pool_connect_timeout_ms: None,
-            pool_idle_timeout_secs: None,
         }
     }
 }
