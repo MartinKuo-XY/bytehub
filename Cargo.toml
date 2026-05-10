@@ -1,6 +1,6 @@
 [package]
 name = "bytehub"
-version = "1.1.5"
+version = "0.0.1"
 authors = ["MartinKuo.XY <martinkuo001@gmail.com>"]
 edition = "2021"
 
