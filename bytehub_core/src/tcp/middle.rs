@@ -238,7 +238,8 @@ async fn relay_plain_timed(
         // Relay completed before the deadline.
         r = &mut relay => {
             // If relay finished before deadline but zero bytes arrived,
-            // the backend is dead (not slow) — mark unhealthy immediately.
+            // the backend closed the connection immediately (refused/crashed).
+            // Mark unhealthy and propagate the error so on_failure is called.
             let no_data = first_byte_us.load(Ordering::Relaxed) == 0;
             if no_data {
                 latency_exceeded.store(true, Ordering::Relaxed);
@@ -250,14 +251,25 @@ async fn relay_plain_timed(
         // Deadline fired — check whether the first byte arrived in time.
         _ = tokio::time::sleep_until(deadline) => {
             if first_byte_us.load(Ordering::Relaxed) > 0 {
-                // First byte arrived within the threshold — let relay finish.
+                // First byte arrived within the threshold — let relay finish normally.
                 relay.await.map(|_| ())
             } else {
-                // Latency exceeded — mark unhealthy but keep the connection alive
-                // so the client still gets the (slow) response.
+                // No first byte within max_latency_ms.
+                // The remote is unresponsive — mark unhealthy and return immediately
+                // (TimedOut error) so the caller calls on_failure without delay.
+                // This is critical for local-port LB targets (e.g. 127.0.0.1:2001):
+                // TCP connect to a local port always succeeds, so relay is the only
+                // place where a dead upstream can be detected.
+                // Returning immediately (instead of relay.await) ensures:
+                //   1. on_failure is called now, not after a multi-second TCP timeout
+                //   2. balancer.next() skips this node for all subsequent requests
+                //   3. the client sees a fast error and can retry via its own logic
                 latency_exceeded.store(true, Ordering::Relaxed);
-                log::warn!("[tcp]no first byte within {}ms, marking unhealthy (connection kept)", max_latency_ms);
-                relay.await.map(|_| ())
+                log::warn!("[tcp]no first byte within {}ms — aborting relay, marking unhealthy", max_latency_ms);
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    format!("no first byte within {}ms", max_latency_ms),
+                ))
             }
         }
     }
