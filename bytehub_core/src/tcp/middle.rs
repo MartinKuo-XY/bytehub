@@ -112,6 +112,7 @@ async fn try_connect_with_fallback(
     extra_raddrs: &[RemoteAddr],
     conn_opts: &ConnectOpts,
     local: &TcpStream,
+    pool: Option<&std::sync::Arc<super::pool::RemotePool>>,
 ) -> Result<(TcpStream, Option<bytehub_lb::Token>)> {
     use bytehub_lb::{Token, BalanceCtx};
     use std::collections::HashSet;
@@ -147,7 +148,26 @@ async fn try_connect_with_fallback(
 
         let start = if max_latency.is_some() { Some(Instant::now()) } else { None };
 
-        match super::socket::connect(selected, conn_opts).await {
+        // Try connection: pool fast-path first, then fresh connect on miss.
+        // Both paths are inside the loop so multi-node fallback is preserved:
+        // if the pool has a stale/dead connection (relay will fail later and
+        // call on_failure), or if socket::connect fails, we mark this token
+        // failed and let the loop pick the next healthy peer.
+        let connect_result = if let (Some(p), Some(tok)) = (pool, token) {
+            // Pool hit: reuse idle connection, saves TCP handshake RTT.
+            // Pool miss: fall through to socket::connect for this token.
+            if let Some(idle) = p.pop_idle(tok).await {
+                log::debug!("[tcp](pool-hit) token={:?}", tok);
+                Ok(idle)
+            } else {
+                log::debug!("[tcp](pool-miss) token={:?} — connecting", tok);
+                super::socket::connect(selected, conn_opts).await
+            }
+        } else {
+            super::socket::connect(selected, conn_opts).await
+        };
+
+        match connect_result {
             Ok(stream) => {
                 // Latency-based failover: connect succeeded but was too slow.
                 if let (Some(max), Some(start)) = (max_latency, start) {
@@ -309,52 +329,23 @@ pub async fn connect_and_relay(
     let mut remote = {
         #[cfg(feature = "balance")]
         {
-            // Connection-pool fast path:
-            //   - If a healthy idle connection is available for the balancer's
-            //     chosen token, reuse it directly (saves the TCP handshake RTT).
-            //   - If the sub-pool is empty or all idle connections are stale,
-            //     fall through to try_connect_with_fallback so that the full
-            //     multi-node retry loop is executed.  This is the critical fix:
-            //     the old code called pool.acquire() which always attempted a
-            //     new connect to a single token and returned Err on failure,
-            //     skipping fallback to other healthy peers entirely.
-            if let Some(pool) = &remote_pool {
-                use bytehub_lb::{Token, BalanceCtx};
-                let src_ip = local.peer_addr()?.ip();
-                let tok = balancer.next(BalanceCtx { src_ip: &src_ip });
-                let token = tok.unwrap_or(Token(0));
-
-                if let Some(stream) = pool.pop_idle(token).await {
-                    // Cache hit — idle connection is alive, use it directly.
-                    log::info!("[tcp](pool-hit){} => token={:?}", local.peer_addr()?, token);
-                    selected_token = Some(token);
-                    stream
-                } else {
-                    // Cache miss — delegate to full multi-node fallback loop.
-                    log::debug!("[tcp](pool-miss) token={:?} — falling back to try_connect_with_fallback", token);
-                    let (stream, tok) = try_connect_with_fallback(
-                        balancer,
-                        raddr.as_ref(),
-                        extra_raddrs.as_ref(),
-                        conn_opts.as_ref(),
-                        &local,
-                    )
-                    .await?;
-                    selected_token = tok;
-                    stream
-                }
-            } else {
-                let (stream, tok) = try_connect_with_fallback(
-                    balancer,
-                    raddr.as_ref(),
-                    extra_raddrs.as_ref(),
-                    conn_opts.as_ref(),
-                    &local,
-                )
-                .await?;
-                selected_token = tok;
-                stream
-            }
+            // Always use try_connect_with_fallback — this preserves the full
+            // multi-node retry loop (identical to hoorayhug-np behaviour).
+            // The pool is passed in so each iteration can try pool.pop_idle
+            // first (fast path) before falling back to socket::connect.
+            // This means pool acceleration and failover correctness are both
+            // fully preserved without any separate pool shortcut branch.
+            let (stream, tok) = try_connect_with_fallback(
+                balancer,
+                raddr.as_ref(),
+                extra_raddrs.as_ref(),
+                conn_opts.as_ref(),
+                &local,
+                remote_pool.as_ref(),
+            )
+            .await?;
+            selected_token = tok;
+            stream
         }
 
         #[cfg(not(feature = "balance"))]
