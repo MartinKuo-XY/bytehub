@@ -1,0 +1,14 @@
+[package]
+name = "bytehub_lb"
+version = "0.1.0"
+authors = ["zephyr <i@zephyr.moe>"]
+description = "ByteHub's load balance strategies."
+repository = "https://github.com/MartinKuo-XY/bytehub-rs"
+readme = "README.md"
+documentation = "https://docs.rs/bytehub_lb"
+keywords = ["lb", "balance", "network"]
+edition = "2021"
+license = "MIT"
+
+[dev-dependencies]
+average = "0.13"

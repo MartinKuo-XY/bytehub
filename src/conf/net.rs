@@ -1,0 +1,353 @@
+use serde::{Serialize, Deserialize};
+use bytehub_core::endpoint::{BindOpts, ConnectOpts};
+
+use super::Config;
+use crate::consts::{TCP_TIMEOUT, UDP_TIMEOUT};
+use crate::consts::{TCP_KEEPALIVE, TCP_KEEPALIVE_PROBE};
+use crate::consts::PROXY_PROTOCOL_VERSION;
+use crate::consts::PROXY_PROTOCOL_TIMEOUT;
+
+#[derive(Serialize, Debug, Deserialize, Clone, Copy, Default)]
+pub struct NetConf {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_tcp: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_udp: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipv6_only: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_mptcp: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_mptcp: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_proxy: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accept_proxy: Option<bool>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_proxy_version: Option<usize>,
+
+    #[serde(default)]
+    pub accept_proxy_timeout: Option<usize>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_keepalive: Option<usize>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_keepalive_probe: Option<usize>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tcp_timeout: Option<usize>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub udp_timeout: Option<usize>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_fails: Option<u32>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "fail_timeout_secs")]
+    pub fail_timeout: Option<u32>,
+
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "max_latency_ms")]
+    pub max_latency: Option<u32>,
+
+    // ── Active probe ────────────────────────────────────────────────────────
+    /// Probe interval for healthy nodes (seconds). Enables active probing when set.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_interval_secs: Option<u64>,
+
+    /// Probe interval for unhealthy nodes (seconds). Defaults to half of probe_interval_secs.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_unhealthy_interval_secs: Option<u64>,
+
+    /// TCP connect timeout for each probe attempt (milliseconds). Default: 3000.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub probe_timeout_ms: Option<u64>,
+
+    // ── Connection pool ─────────────────────────────────────────────────────
+    /// Max idle connections per peer. Setting this > 0 enables the pool.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_size: Option<usize>,
+
+    /// Min idle connections the warmup task tries to maintain per peer.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_min_idle: Option<usize>,
+
+    /// TCP connect timeout used by the pool (milliseconds). Default: 3000.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_connect_timeout_ms: Option<u64>,
+
+    /// Drop idle connections older than this many seconds. Default: 30.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_idle_timeout_secs: Option<u64>,
+}
+
+#[derive(Debug)]
+pub struct NetInfo {
+    pub bind_opts: BindOpts,
+    pub conn_opts: ConnectOpts,
+    pub no_tcp: bool,
+    pub use_udp: bool,
+    pub max_fails: Option<u32>,
+    pub fail_timeout: Option<u32>,
+    pub max_latency: Option<u32>,
+    // probe
+    pub probe_interval_secs: Option<u64>,
+    pub probe_unhealthy_interval_secs: Option<u64>,
+    pub probe_timeout_ms: Option<u64>,
+    // pool
+    pub pool_size: Option<usize>,
+    pub pool_min_idle: Option<usize>,
+    pub pool_connect_timeout_ms: Option<u64>,
+    pub pool_idle_timeout_secs: Option<u64>,
+}
+
+impl Config for NetConf {
+    type Output = NetInfo;
+
+    fn is_empty(&self) -> bool {
+        crate::empty![self =>
+            no_tcp, use_udp, ipv6_only,
+            send_mptcp, accept_mptcp,
+            send_proxy, accept_proxy, send_proxy_version, accept_proxy_timeout,
+            tcp_keepalive, tcp_keepalive_probe, tcp_timeout, udp_timeout,
+            max_fails, fail_timeout, max_latency,
+            probe_interval_secs, probe_unhealthy_interval_secs, probe_timeout_ms,
+            pool_size, pool_min_idle, pool_connect_timeout_ms, pool_idle_timeout_secs
+        ]
+    }
+
+    fn build(self) -> Self::Output {
+        macro_rules! unbox {
+            ($field: ident) => {
+                self.$field.unwrap_or_default()
+            };
+            ($field: ident, $value: expr) => {
+                self.$field.unwrap_or($value)
+            };
+        }
+
+        let no_tcp = unbox!(no_tcp);
+        let use_udp = unbox!(use_udp);
+        let ipv6_only = unbox!(ipv6_only);
+        let send_mptcp = unbox!(send_mptcp);
+        let accept_mptcp = unbox!(accept_mptcp);
+        let tcp_kpa = unbox!(tcp_keepalive, TCP_KEEPALIVE);
+        let tcp_kpa_probe = unbox!(tcp_keepalive_probe, TCP_KEEPALIVE_PROBE);
+        let tcp_timeout = unbox!(tcp_timeout, TCP_TIMEOUT);
+        let udp_timeout = unbox!(udp_timeout, UDP_TIMEOUT);
+
+        let bind_opts = BindOpts {
+            ipv6_only,
+            accept_mptcp,
+            bind_interface: None,
+        };
+        let conn_opts = ConnectOpts {
+            send_mptcp,
+            tcp_keepalive: tcp_kpa,
+            tcp_keepalive_probe: tcp_kpa_probe,
+            connect_timeout: tcp_timeout,
+            associate_timeout: udp_timeout,
+
+            // from endpoint
+            bind_address: None,
+            bind_interface: None,
+            
+            // ======== 补充新增字段的初始化 ========
+            obfs: String::new(),
+            // ====================================
+
+            #[cfg(feature = "balance")]
+            balancer: Default::default(),
+
+            #[cfg(feature = "transport")]
+            transport: None,
+
+            #[cfg(feature = "proxy")]
+            proxy_opts: {
+                use bytehub_core::endpoint::ProxyOpts;
+                let send_proxy = unbox!(send_proxy);
+                let send_proxy_version = unbox!(send_proxy_version, PROXY_PROTOCOL_VERSION);
+                let accept_proxy = unbox!(accept_proxy);
+                let accept_proxy_timeout = unbox!(accept_proxy_timeout, PROXY_PROTOCOL_TIMEOUT);
+                ProxyOpts {
+                    send_proxy,
+                    accept_proxy,
+                    send_proxy_version,
+                    accept_proxy_timeout,
+                }
+            },
+        };
+
+        let max_fails = self.max_fails;
+        let fail_timeout = self.fail_timeout;
+        let max_latency = self.max_latency;
+
+        NetInfo {
+            bind_opts,
+            conn_opts,
+            no_tcp,
+            use_udp,
+            max_fails,
+            fail_timeout,
+            max_latency,
+            probe_interval_secs: self.probe_interval_secs,
+            probe_unhealthy_interval_secs: self.probe_unhealthy_interval_secs,
+            probe_timeout_ms: self.probe_timeout_ms,
+            pool_size: self.pool_size,
+            pool_min_idle: self.pool_min_idle,
+            pool_connect_timeout_ms: self.pool_connect_timeout_ms,
+            pool_idle_timeout_secs: self.pool_idle_timeout_secs,
+        }
+    }
+
+    fn rst_field(&mut self, other: &Self) -> &mut Self {
+        use crate::rst;
+        let other = *other;
+
+        rst!(self, no_tcp, other);
+        rst!(self, use_udp, other);
+        rst!(self, ipv6_only, other);
+        rst!(self, send_mptcp, other);
+        rst!(self, accept_mptcp, other);
+        rst!(self, tcp_keepalive, other);
+        rst!(self, tcp_keepalive_probe, other);
+        rst!(self, tcp_timeout, other);
+        rst!(self, udp_timeout, other);
+        rst!(self, send_proxy, other);
+        rst!(self, accept_proxy, other);
+        rst!(self, send_proxy_version, other);
+        rst!(self, accept_proxy_timeout, other);
+        rst!(self, max_fails, other);
+        rst!(self, fail_timeout, other);
+        rst!(self, max_latency, other);
+        rst!(self, probe_interval_secs, other);
+        rst!(self, probe_unhealthy_interval_secs, other);
+        rst!(self, probe_timeout_ms, other);
+        rst!(self, pool_size, other);
+        rst!(self, pool_min_idle, other);
+        rst!(self, pool_connect_timeout_ms, other);
+        rst!(self, pool_idle_timeout_secs, other);
+        self
+    }
+
+    fn take_field(&mut self, other: &Self) -> &mut Self {
+        use crate::take;
+        let other = *other;
+
+        take!(self, no_tcp, other);
+        take!(self, use_udp, other);
+        take!(self, ipv6_only, other);
+        take!(self, send_mptcp, other);
+        take!(self, accept_mptcp, other);
+        take!(self, tcp_keepalive, other);
+        take!(self, tcp_keepalive_probe, other);
+        take!(self, tcp_timeout, other);
+        take!(self, udp_timeout, other);
+        take!(self, send_proxy, other);
+        take!(self, accept_proxy, other);
+        take!(self, send_proxy_version, other);
+        take!(self, accept_proxy_timeout, other);
+        take!(self, max_fails, other);
+        take!(self, fail_timeout, other);
+        take!(self, max_latency, other);
+        take!(self, probe_interval_secs, other);
+        take!(self, probe_unhealthy_interval_secs, other);
+        take!(self, probe_timeout_ms, other);
+        take!(self, pool_size, other);
+        take!(self, pool_min_idle, other);
+        take!(self, pool_connect_timeout_ms, other);
+        take!(self, pool_idle_timeout_secs, other);
+        self
+    }
+
+    fn from_cmd_args(matches: &clap::ArgMatches) -> Self {
+        macro_rules! unpack {
+            ($key: expr) => {
+                if matches.get_flag($key) {
+                    Some(true)
+                } else {
+                    None
+                }
+            };
+            ($key: expr, $t: ident) => {
+                matches.get_one::<String>($key).and_then(|x| x.parse::<$t>().ok())
+            };
+        }
+
+        let no_tcp = unpack!("no_tcp");
+        let use_udp = unpack!("use_udp");
+        let use_mptcp = unpack!("use_mptcp");
+        let ipv6_only = unpack!("ipv6_only");
+
+        let send_mptcp = use_mptcp;
+        let accept_mptcp = use_mptcp;
+
+        let tcp_keepalive = unpack!("tcp_keepalive", usize);
+        let tcp_keepalive_probe = unpack!("tcp_keepalive", usize);
+        let tcp_timeout = unpack!("tcp_timeout", usize);
+        let udp_timeout = unpack!("udp_timeout", usize);
+
+        let send_proxy = unpack!("send_proxy", bool);
+        let send_proxy_version = unpack!("send_proxy_version", usize);
+
+        let accept_proxy = unpack!("accept_proxy", bool);
+        let accept_proxy_timeout = unpack!("accept_proxy_timeout", usize);
+
+        Self {
+            no_tcp,
+            use_udp,
+            ipv6_only,
+            send_mptcp,
+            accept_mptcp,
+            tcp_keepalive,
+            tcp_keepalive_probe,
+            tcp_timeout,
+            udp_timeout,
+            send_proxy,
+            accept_proxy,
+            send_proxy_version,
+            accept_proxy_timeout,
+            max_fails: None,
+            fail_timeout: None,
+            max_latency: None,
+            probe_interval_secs: None,
+            probe_unhealthy_interval_secs: None,
+            probe_timeout_ms: None,
+            pool_size: None,
+            pool_min_idle: None,
+            pool_connect_timeout_ms: None,
+            pool_idle_timeout_secs: None,
+        }
+    }
+}

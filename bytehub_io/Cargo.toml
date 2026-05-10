@@ -1,0 +1,25 @@
+[package]
+name = "bytehub_io"
+version = "0.5.3"
+authors = ["zephyr <i@zephyr.moe>"]
+description = "ByteHub's high performance IO collections."
+repository = "https://github.com/MartinKuo-XY/bytehub-rs"
+readme = "README.md"
+documentation = "https://docs.rs/bytehub_io"
+keywords = ["network", "zero-copy", "relay"]
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+libc = "0.2"
+socket2 = "0.5"
+tokio = "1.9"
+
+[target.'cfg(unix)'.dependencies]
+tokio = { version = "1.9", features = ["net"] }
+
+[features]
+default = []
+brutal-shutdown = []
+peek = []
+statistic = []
